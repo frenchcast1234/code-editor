@@ -1,0 +1,1253 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+void main() {
+  runApp(const MainApp());
+}
+
+class MainApp extends StatelessWidget {
+  const MainApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(fontFamily: 'JetBrains Mono'),
+      home: CodeField(),
+    );
+  }
+}
+
+class CodeField extends StatefulWidget {
+  const CodeField({super.key});
+
+  @override
+  State<CodeField> createState() => _CodeFieldState();
+}
+
+class _CodeFieldState extends State<CodeField> {
+  // Controllers
+  final _searchController = TextEditingController();
+  final ScrollController _textScroll = ScrollController();
+  final ScrollController _numberScroll = ScrollController();
+
+  // Settings
+  double fontSize = 14;
+  double lineHeight = 1.4;
+  String mode = "basic";
+  double spacesPerTab = 4;
+
+  // Real settings
+  final _fontSizeController = TextEditingController(text: "14");
+  bool convertTabsToSpace = false;
+  final _tabsSizeController = TextEditingController(text: "4");
+  bool encapsulerLesLignes = true;
+
+  // Tabs system
+  List<String> fileNames = ["Text"]; // noms des onglets
+  List<TextEditingController> controllers = [
+    //Exemple de code complexe et long pour tester le wrap
+    SyntaxController(
+      text: r""" 
+type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
+
+interface ApiResponse<T> {
+  status: number;
+  data: T;
+  meta: { timestamp: string; requestId: string };
+}
+
+type ExtractNestedData<T, K extends keyof T> = T[K] extends Array<infer U> ? U : T[K];
+
+const fetchData = async <T extends object, K extends keyof T>(url: string, key: K): Promise<ExtractNestedData<T, K>[]> => {
+    try { 
+        const response: ApiResponse<T> = await (await fetch(url)).json(); 
+        if (response.status !== 200) throw new Error(`Fetch failed with status ${response.status} for requestId ${response.meta.requestId} at ${response.meta.timestamp}`);
+        return (response.data[key] as unknown) as ExtractNestedData<T, K>[];
+    } catch (err) {
+        console.error(`Error fetching data from ${url}: ${(err as Error).message}`, err); 
+        return [];
+    }
+};
+
+type ComplexData = { users: { id: string; profile: { name: string; age: number; tags: string[]; addresses: { city: string; country: string; zip: string }[] }[] } };
+
+(async () => {
+    const users: DeepReadonly<ComplexData["users"]> = await fetchData<ComplexData, "users">("https://api.example.com/users", "users");
+    const namesAndCities: string[] = users.flatMap(user => user.profile.flatMap(p => p.addresses.map(a => `${p.name} lives in ${a.city}, ${a.country} (${a.zip})`)));
+    console.log(namesAndCities.join(" | "));
+})();
+      """,
+      baseStyle: TextStyle(
+        color: Color(0xffebebeb),
+        fontSize: 14,
+        height: 1.4,
+        fontFamily: 'JetBrains Mono',
+      ),
+    ),
+  ]; // contrôleurs des TextField
+  List<FocusNode> focusNodes = [FocusNode()];
+  int currentIndex = 0; // onglet actif
+
+  @override
+  void initState() {
+    super.initState();
+
+    _textScroll.addListener(() {
+      if (_numberScroll.hasClients) {
+        _numberScroll.jumpTo(_textScroll.offset);
+      }
+    });
+  }
+
+  int getLineCount(text) {
+    if (text.isEmpty) return 1;
+    return '\n'.allMatches(text).length + 1;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DefaultTabController(
+      length: controllers.length,
+      child: Scaffold(
+        backgroundColor: Color(0xff1f1f1f),
+        appBar: AppBar(
+          backgroundColor: Color(0xff1f1f1f),
+          flexibleSpace:
+              MediaQuery.of(context).orientation == Orientation.landscape
+              ? Stack(
+                  children: [
+                    Center(
+                      child: Text(
+                        'Text',
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xffebebeb),
+                        ),
+                      ),
+                    ),
+                  ],
+                )
+              : null, // Opérateur ternaire
+          iconTheme: IconThemeData(color: Color(0xffebebeb)),
+          toolbarHeight: 48.0,
+          bottom: PreferredSize(
+            preferredSize: Size.fromHeight(
+              2,
+            ), // hauteur du TabBar + ligne + espacement
+            child: Container(color: Color(0x1fffffff), height: 2.0),
+          ),
+          leadingWidth: 280.0,
+          leading: Row(
+            children: [
+              SizedBox(width: 8.0),
+              Builder(
+                builder: (context) {
+                  return IconButton(
+                    icon: Icon(Icons.menu, color: Color(0xffebebeb)),
+                    onPressed: () {
+                      Scaffold.of(context).openDrawer();
+                    },
+                  );
+                },
+              ),
+              if (MediaQuery.of(context).orientation ==
+                  Orientation.landscape) ...[
+                SizedBox(width: 24.0),
+                Container(
+                  height: 30,
+                  width: 208,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(100),
+                    border: Border.all(color: Color(0x1fffffff)),
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    style: TextStyle(
+                      color: Color(0xffebebeb),
+                      fontSize: 14,
+                      height: 1.0,
+                    ),
+                    textAlignVertical: TextAlignVertical.top,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      contentPadding: EdgeInsets.only(left: 16.0),
+                      border: InputBorder.none,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            IconButton(
+              onPressed: () {},
+              icon: Icon(Icons.arrow_back),
+              color: Color(0xffebebeb),
+              tooltip: 'Annuler',
+            ),
+            IconButton(
+              onPressed: () {},
+              icon: Icon(Icons.arrow_forward),
+              color: Color(0xffebebeb),
+              tooltip: 'Rétablir',
+            ),
+            IconButton(
+              onPressed: () {},
+              icon: Icon(Icons.keyboard_tab),
+              color: Color(0xffebebeb),
+              tooltip: 'Tabulation',
+            ),
+          ],
+        ),
+        drawer: Drawer(
+          backgroundColor: Color(0xff1f1f1f),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.start,
+            children: [
+              if (mode == "basic") ...[
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Color(0xff1f1f1f),
+                    border: Border(
+                      bottom: BorderSide(color: Color(0x1fffffff), width: 2.0),
+                    ),
+                  ),
+                  height: 50.0,
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 30.0),
+                    child: Text(
+                      'Text',
+                      style: TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xffebebeb),
+                      ),
+                      textAlign: TextAlign.start,
+                    ),
+                  ),
+                ),
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Color(0xff1f1f1f),
+                    border: Border(
+                      bottom: BorderSide(color: Color(0x1fffffff), width: 2.0),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 24.0,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          height: 36.0,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              setState(() {
+                                fileNames.add(
+                                  "Nouveau fichier ${fileNames.length + 1}",
+                                );
+                                controllers.add(TextEditingController());
+                                focusNodes.add(FocusNode());
+                                currentIndex = fileNames.length - 1;
+                              });
+                            },
+                            style: ElevatedButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              backgroundColor: Color(0xff1f1f1f),
+                              foregroundColor: Color(0xffebebeb),
+                              textStyle: TextStyle(
+                                fontSize: 20,
+                                fontFamily: 'JetBrains Mono',
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 0.0,
+                              ),
+                              child: Text('Nouveau fichier'),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 8.0),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 36.0,
+                          child: ElevatedButton(
+                            onPressed: () {},
+                            style: ElevatedButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              backgroundColor: Color(0xff1f1f1f),
+                              foregroundColor: Color(0xffebebeb),
+                              textStyle: TextStyle(
+                                fontSize: 20,
+                                fontFamily: 'JetBrains Mono',
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 0.0,
+                              ),
+                              child: Text('Ouvrir'),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 8.0),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 36.0,
+                          child: ElevatedButton(
+                            onPressed: () {},
+                            style: ElevatedButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              backgroundColor: Color(0xff1f1f1f),
+                              foregroundColor: Color(0xffebebeb),
+                              textStyle: TextStyle(
+                                fontSize: 20,
+                                fontFamily: 'JetBrains Mono',
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 0.0,
+                              ),
+                              child: Text('Enregistrer'),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 8.0),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 36.0,
+                          child: ElevatedButton(
+                            onPressed: () {},
+                            style: ElevatedButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              backgroundColor: Color(0xff1f1f1f),
+                              foregroundColor: Color(0xffebebeb),
+                              textStyle: TextStyle(
+                                fontSize: 20,
+                                fontFamily: 'JetBrains Mono',
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 0.0,
+                              ),
+                              child: Text('Enregistrer sous'),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (MediaQuery.of(context).orientation ==
+                    Orientation.portrait) ...[
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: Color(0xff1f1f1f),
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Color(0x1fffffff),
+                          width: 2.0,
+                        ),
+                      ),
+                    ),
+                    height: 48,
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                    child: Container(
+                      height: 30,
+                      width: double.infinity,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(100),
+                        border: Border.all(color: Color(0x1fffffff)),
+                      ),
+                      child: TextField(
+                        controller: _searchController,
+                        style: TextStyle(
+                          color: Color(0xffebebeb),
+                          fontSize: 14,
+                          height: 1.0,
+                        ),
+                        textAlignVertical: TextAlignVertical.top,
+                        decoration: InputDecoration(
+                          isDense: true,
+                          contentPadding: EdgeInsets.only(left: 16.0),
+                          border: InputBorder.none,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 24.0,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: double.infinity,
+                          height: 36.0,
+                          child: ElevatedButton(
+                            onPressed: () {
+                              mode = "console";
+                              setState(() {});
+                            },
+                            style: ElevatedButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              backgroundColor: Color(0xff1f1f1f),
+                              foregroundColor: Color(0xffebebeb),
+                              textStyle: TextStyle(
+                                fontSize: 20,
+                                fontFamily: 'JetBrains Mono',
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 0.0,
+                              ),
+                              child: Text('Console'),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: 8.0),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 36.0,
+                          child: ElevatedButton(
+                            onPressed: () {},
+                            style: ElevatedButton.styleFrom(
+                              alignment: Alignment.centerLeft,
+                              backgroundColor: Color(0xff1f1f1f),
+                              foregroundColor: Color(0xffebebeb),
+                              textStyle: TextStyle(
+                                fontSize: 20,
+                                fontFamily: 'JetBrains Mono',
+                              ),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 0.0,
+                              ),
+                              child: Text('Exécuter'),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Color(0xff1f1f1f),
+                    border: Border(
+                      top: BorderSide(color: Color(0x1fffffff), width: 2.0),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8.0,
+                      vertical: 16.0,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          mode = "settings";
+                          setState(() {});
+                        },
+                        style: ElevatedButton.styleFrom(
+                          alignment: Alignment.centerLeft,
+                          backgroundColor: Color(0xff1f1f1f),
+                          foregroundColor: Color(0xffebebeb),
+                          textStyle: TextStyle(
+                            fontSize: 20,
+                            fontFamily: 'JetBrains Mono',
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 0.0),
+                          child: Text('Paramètres'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ] else if (mode == "settings") ...[
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Color(0xff1f1f1f),
+                    border: Border(
+                      bottom: BorderSide(color: Color(0x1fffffff), width: 2.0),
+                    ),
+                  ),
+                  height: 50.0,
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 30.0),
+                    child: Text(
+                      'Paramètres',
+                      style: TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xffebebeb),
+                      ),
+                      textAlign: TextAlign.start,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(
+                      left: 30.0,
+                      right: 8.0,
+                      top: 24.0,
+                      bottom: 24.0,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Taille de la police',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xffebebeb),
+                                ),
+                              ),
+                            ),
+                            // DropdownButton<double>(
+                            //   value: fontSize,
+                            //   dropdownColor: Color(0xff1f1f1f),
+                            //   items: [12, 14, 16, 18, 20, 22, 24]
+                            //       .map(
+                            //         (size) => DropdownMenuItem(
+                            //           value: size.toDouble(),
+                            //           child: Text(
+                            //             size.toString(),
+                            //             style: TextStyle(
+                            //               color: Color(0xffebebeb),
+                            //               fontSize: 20,
+                            //             ),
+                            //           ),
+                            //         ),
+                            //       )
+                            //       .toList(),
+                            //   onChanged: (value) {
+                            //     if (value != null) {
+                            //       setState(() {
+                            //         fontSize = value;
+                            //       });
+                            //     }
+                            //   },
+                            // ),
+                            SizedBox(
+                              height: 36.0,
+                              width: 55.0,
+                              child: TextField(
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xffebebeb),
+                                ),
+                                controller: _fontSizeController,
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(100.0),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  filled: true,
+                                  fillColor: Color(0xff3a3a3a),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8.0,
+                                    vertical: 4.0,
+                                  ),
+                                ),
+                                textAlign: TextAlign.center,
+                                textAlignVertical: TextAlignVertical.center,
+                                onSubmitted: (_) {
+                                  final parsed = double.tryParse(
+                                    _fontSizeController.text,
+                                  );
+
+                                  setState(() {
+                                    fontSize = (parsed ?? 14)
+                                        .clamp(8.0, 40.0)
+                                        .toDouble();
+                                    _fontSizeController.text = fontSize
+                                        .toInt()
+                                        .toString();
+
+                                    // Mise à jour de tous les contrôleurs
+                                    for (var controller in controllers) {
+                                      if (controller is SyntaxController) {
+                                        controller.baseStyle = controller
+                                            .baseStyle
+                                            .copyWith(fontSize: fontSize);
+                                      }
+                                    }
+                                  });
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Convertir les tabulations en espaces',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xffebebeb),
+                                ),
+                                softWrap: true,
+                                overflow: TextOverflow.visible,
+                              ),
+                            ),
+                            SizedBox(
+                              height: 36.0,
+                              width: 55.0,
+                              child: Switch(
+                                value: convertTabsToSpace,
+                                onChanged: (value) {
+                                  setState(() {
+                                    convertTabsToSpace = value;
+                                  });
+                                },
+                                activeColor: Color(0xff1b72e8),
+                                inactiveThumbColor: Color(0xFFB9B9B9),
+                                activeTrackColor: Color(0xff1e3553),
+                                inactiveTrackColor: Color(0xff636363),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                'Taille des tabulations',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xffebebeb),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              height: 36.0,
+                              width: 55.0,
+                              child: TextField(
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Color(0xffebebeb),
+                                ),
+                                controller: _tabsSizeController,
+                                keyboardType: TextInputType.number,
+                                inputFormatters: [
+                                  FilteringTextInputFormatter.digitsOnly,
+                                ],
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(100.0),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  filled: true,
+                                  fillColor: Color(0xff3a3a3a),
+                                  contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8.0,
+                                    vertical: 4.0,
+                                  ),
+                                ),
+                                textAlign: TextAlign.center,
+                                textAlignVertical: TextAlignVertical.center,
+                                onSubmitted: (_) => setState(() {
+                                  final parsed = double.tryParse(
+                                    _tabsSizeController.text,
+                                  );
+                                  setState(() {
+                                    spacesPerTab = (parsed ?? 2)
+                                        .clamp(1.0, 10.0)
+                                        .toDouble();
+                                    _tabsSizeController.text = spacesPerTab
+                                        .toInt()
+                                        .toString();
+                                  });
+                                }),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Color(0xff1f1f1f),
+                    border: Border(
+                      top: BorderSide(color: Color(0x1fffffff), width: 2.0),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8.0,
+                      vertical: 16.0,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          mode = "basic";
+                          setState(() {});
+                        },
+                        style: ElevatedButton.styleFrom(
+                          alignment: Alignment.centerLeft,
+                          backgroundColor: Color(0xff1f1f1f),
+                          foregroundColor: Color(0xffebebeb),
+                          textStyle: TextStyle(
+                            fontSize: 20,
+                            fontFamily: 'JetBrains Mono',
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 0.0),
+                          child: Text('Retour'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ] else if (mode == "console") ...[
+                Container(
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: Color(0xff1f1f1f),
+                    border: Border(
+                      bottom: BorderSide(color: Color(0x1fffffff), width: 2.0),
+                    ),
+                  ),
+                  height: 50.0,
+                  alignment: Alignment.centerLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 30.0),
+                    child: Text(
+                      'Console',
+                      style: TextStyle(
+                        fontSize: 21,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xffebebeb),
+                      ),
+                      textAlign: TextAlign.start,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: 8.0,
+                            vertical: 24.0,
+                          ),
+                        ),
+                      ),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Color(0xff1f1f1f),
+                          border: Border(
+                            top: BorderSide(
+                              color: Color(0x1fffffff),
+                              width: 2.0,
+                            ),
+                          ),
+                        ),
+                        width: double.infinity,
+                        height: 36.0,
+                        child: TextField(
+                          style: TextStyle(
+                            color: Color(0xffebebeb),
+                            fontSize: 14,
+                            height: 1.8,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Entrez une commande...',
+                            hintStyle: TextStyle(
+                              color: Color(0xff666666),
+                              fontSize: 14,
+                            ),
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: 8.0,
+                            ),
+                            isDense: true,
+                          ),
+                          textAlign: TextAlign.left,
+                          textAlignVertical: TextAlignVertical.center,
+                          onSubmitted: (value) {
+                            if (value.isEmpty) {
+                              return;
+                            }
+                            // Logique
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Color(0xff1f1f1f),
+                    border: Border(
+                      top: BorderSide(color: Color(0x1fffffff), width: 2.0),
+                    ),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8.0,
+                      vertical: 16.0,
+                    ),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          mode = "basic";
+                          setState(() {});
+                        },
+                        style: ElevatedButton.styleFrom(
+                          alignment: Alignment.centerLeft,
+                          backgroundColor: Color(0xff1f1f1f),
+                          foregroundColor: Color(0xffebebeb),
+                          textStyle: TextStyle(
+                            fontSize: 20,
+                            fontFamily: 'JetBrains Mono',
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 0.0),
+                          child: Text('Retour'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        body: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            SizedBox(
+              width: double.infinity,
+              height: 32.0,
+              child: TabBar(
+                onTap: (index) {
+                  setState(() {
+                    currentIndex = index;
+                  });
+                },
+                isScrollable: true,
+                labelPadding: EdgeInsets.symmetric(horizontal: 4.0),
+                labelStyle: TextStyle(
+                  fontSize: 16,
+                  fontFamily: "JetBrains Mono",
+                  fontWeight: FontWeight.bold,
+                ),
+                labelColor: Color(0xffebebeb),
+                unselectedLabelStyle: TextStyle(
+                  fontSize: 16,
+                  fontFamily: "JetBrains Mono",
+                  fontWeight: FontWeight.normal,
+                ),
+                unselectedLabelColor: Color(0xffebebeb),
+                dividerColor: Color(0x1fffffff),
+                dividerHeight: 2.0,
+                indicator: BoxDecoration(
+                  color: Color(0x1fffffff),
+                  border: Border(
+                    bottom: BorderSide(color: Color(0x1fffffff), width: 2.0),
+                  ),
+                ),
+                indicatorColor: Color(0x1fffffff),
+                tabs: [for (var name in fileNames) Tab(child: Text(name))],
+              ),
+            ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  for (int i = 0; i < controllers.length; i++)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 50,
+                          child: SingleChildScrollView(
+                            controller: _numberScroll,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: List.generate(
+                                getLineCount(controllers[i].text),
+                                (index) => Text(
+                                  "${index + 1}",
+                                  style: TextStyle(
+                                    color: const Color(0xff666666),
+                                    fontSize: fontSize,
+                                    height: lineHeight,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: Focus(
+                              focusNode: focusNodes[i],
+                              onKeyEvent: (node, event) {
+                                final controller = controllers[i];
+                                final text = controller.text;
+                                final selection = controller.selection;
+                                final tabSize = spacesPerTab.toInt();
+
+                                if (selection.isCollapsed) {
+                                  final cursor = selection.start;
+
+                                  // Récupère le début de la ligne
+                                  int lineStart = text.lastIndexOf(
+                                    '\n',
+                                    cursor - 1,
+                                  );
+                                  lineStart = lineStart == -1
+                                      ? 0
+                                      : lineStart + 1;
+                                  final column = cursor - lineStart;
+
+                                  // TAB
+                                  if (event is KeyDownEvent &&
+                                      event.logicalKey ==
+                                          LogicalKeyboardKey.tab) {
+                                    final spacesToInsert =
+                                        tabSize - (column % tabSize);
+                                    controller.value = controller.value
+                                        .copyWith(
+                                          text: text.replaceRange(
+                                            cursor,
+                                            cursor,
+                                            ' ' * spacesToInsert,
+                                          ),
+                                          selection: TextSelection.collapsed(
+                                            offset: cursor + spacesToInsert,
+                                          ),
+                                        );
+                                    return KeyEventResult.handled;
+                                  }
+
+                                  // BACKSPACE
+                                  if (event is KeyDownEvent &&
+                                      event.logicalKey ==
+                                          LogicalKeyboardKey.backspace &&
+                                      cursor > 0) {
+                                    int removed = 1;
+
+                                    // Si avant le curseur il y a des espaces, supprime jusqu'à tabSize
+                                    int spaceCount = 0;
+                                    for (
+                                      int i = cursor - 1;
+                                      i >= lineStart && text[i] == ' ';
+                                      i--
+                                    ) {
+                                      spaceCount++;
+                                    }
+
+                                    if (spaceCount > 0) {
+                                      removed = spaceCount % tabSize == 0
+                                          ? tabSize
+                                          : spaceCount % tabSize;
+                                    }
+
+                                    final newStart = cursor - removed;
+                                    controller.value = controller.value
+                                        .copyWith(
+                                          text: text.replaceRange(
+                                            newStart,
+                                            cursor,
+                                            '',
+                                          ),
+                                          selection: TextSelection.collapsed(
+                                            offset: newStart,
+                                          ),
+                                        );
+                                    return KeyEventResult.handled;
+                                  }
+                                }
+
+                                return KeyEventResult.ignored;
+                              },
+                              child: TextField(
+                                controller: controllers[i],
+                                scrollController: _textScroll,
+                                expands: true,
+                                maxLines: null,
+                                style: TextStyle(
+                                  color: const Color(0xffebebeb),
+                                  fontSize: fontSize,
+                                  height: lineHeight,
+                                ),
+                                decoration: const InputDecoration(
+                                  border: InputBorder.none,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  // Fin de la boucle for
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class SyntaxController extends TextEditingController {
+  TextStyle baseStyle;
+
+  SyntaxController({super.text, required this.baseStyle});
+
+  static final keywords = [
+    "const",
+    "final",
+    "var",
+    "class",
+    "extends",
+    "return",
+    "if",
+    "else",
+    "for",
+    "while",
+    "async",
+    "await",
+    "try",
+    "catch",
+    "throw",
+    "new",
+    "void",
+    "int",
+    "double",
+    "String",
+    "bool",
+    "true",
+    "false",
+    "null",
+    "import",
+  ];
+
+  int? findMatchingParen(String text, int index) {
+    if (index < 0 || index >= text.length) return null;
+    final char = text[index];
+    final stack = <int>[];
+    final open = '([{';
+    final close = ')]}';
+    final match = {')': '(', ']': '[', '}': '{', '(': ')', '[': ']', '{': '}'};
+
+    if (open.contains(char)) {
+      for (int i = index + 1; i < text.length; i++) {
+        if (text[i] == char)
+          stack.add(i);
+        else if (text[i] == match[char]) {
+          if (stack.isEmpty)
+            return i;
+          else
+            stack.removeLast();
+        }
+      }
+    } else if (close.contains(char)) {
+      for (int i = index - 1; i >= 0; i--) {
+        if (text[i] == char)
+          stack.add(i);
+        else if (text[i] == match[char]) {
+          if (stack.isEmpty)
+            return i;
+          else
+            stack.removeLast();
+        }
+      }
+    }
+
+    return null; // pas de correspondance
+  }
+
+  @override
+  TextSpan buildTextSpan({
+    required BuildContext context,
+    TextStyle? style,
+    required bool withComposing,
+  }) {
+    final children = <TextSpan>[];
+
+    final cursor = selection?.start ?? 0;
+    final highlightColor = Color(0xfff8f8f2); // couleur pour la paire
+    final matchIndex = findMatchingParen(text, cursor - 1);
+
+    final regex = RegExp(
+      r'''(//.*|".*?"|'.*?'|\b\d+\b|\b(type|interface|class|extends|keyof|infer|readonly|async|await|try|catch|return|const|let|var|new|throw|if|else|for|while)\b|\b(string|number|boolean|object|Promise)\b|\b[A-Z][A-Za-z0-9_]*\b|\b[a-zA-Z_][a-zA-Z0-9_]*(?=\()|\b[a-zA-Z_][a-zA-Z0-9_]*\b)''',
+      multiLine: true,
+    );
+    final symbolRegex = RegExp(r'[()\[\]{}<>.,;:=+\-*/!?&|]');
+
+    int i = 0;
+
+    while (i < text.length) {
+      // 1️⃣ Vérifie les symboles en priorité
+      final symbolMatch = symbolRegex.matchAsPrefix(text, i);
+      if (symbolMatch != null) {
+        TextStyle spanStyle = baseStyle.copyWith(
+          color: const Color(0xfff8f8f2),
+        );
+        // Surlignage parenthèses
+        if (i == cursor - 1 || i == matchIndex) {
+          spanStyle = spanStyle.copyWith(
+            decoration: TextDecoration.underline,
+            decorationColor: highlightColor,
+            decorationThickness: 4.0,
+          );
+        }
+
+        children.add(TextSpan(text: symbolMatch.group(0), style: spanStyle));
+        i = symbolMatch.end;
+        continue;
+      }
+
+      // 2️⃣ Vérifie le regex complexe pour mots, nombres, chaînes, fonctions, etc.
+      final match = regex.matchAsPrefix(text, i);
+      if (match != null) {
+        final matchText = match.group(0)!;
+        TextStyle spanStyle = baseStyle;
+
+        // Surlignage parenthèses
+        if (i == cursor - 1 || i == matchIndex) {
+          spanStyle = spanStyle.copyWith(
+            decoration: TextDecoration.underline,
+            decorationColor: highlightColor,
+            decorationThickness: 2.0,
+          );
+        }
+
+        if (matchText.startsWith("//")) {
+          spanStyle = baseStyle.copyWith(color: const Color(0xff75715e));
+        } else if (matchText.startsWith('"') || matchText.startsWith("'")) {
+          spanStyle = baseStyle.copyWith(color: const Color(0xffe6db74));
+        } else if (RegExp(r'^\d+$').hasMatch(matchText)) {
+          spanStyle = baseStyle.copyWith(color: const Color(0xffae81ff));
+        } else if ([
+          "type",
+          "interface",
+          "class",
+          "extends",
+          "keyof",
+          "infer",
+          "readonly",
+          "async",
+          "await",
+          "try",
+          "catch",
+          "return",
+          "const",
+          "let",
+          "var",
+          "new",
+          "throw",
+          "if",
+          "else",
+          "for",
+          "while",
+        ].contains(matchText)) {
+          spanStyle = baseStyle.copyWith(color: const Color(0xfff92672));
+        } else if ([
+          "string",
+          "number",
+          "boolean",
+          "object",
+          "Promise",
+        ].contains(matchText)) {
+          spanStyle = baseStyle.copyWith(color: const Color(0xffae81ff));
+        } else if (RegExp(r'^[A-Z]').hasMatch(matchText)) {
+          spanStyle = baseStyle.copyWith(color: const Color(0xfffd971f));
+        } else if (RegExp(
+          r'[a-zA-Z_][a-zA-Z0-9_]*(?=\()',
+        ).hasMatch(matchText)) {
+          spanStyle = baseStyle.copyWith(color: const Color(0xff66d9ef));
+        } else if (["console", "fetch", "Error"].contains(matchText)) {
+          spanStyle = baseStyle.copyWith(color: const Color(0xff9fb4d6));
+        } else {
+          spanStyle = baseStyle.copyWith(color: const Color(0xffa6e22e));
+        }
+
+        children.add(TextSpan(text: matchText, style: spanStyle));
+        i += matchText.length;
+      } else {
+        // Aucun match : texte brut
+        TextStyle spanStyle = baseStyle.copyWith(
+          color: const Color(0xffa6e22e),
+        );
+        // Surlignage parenthèses
+        if (i == cursor - 1 || i == matchIndex) {
+          spanStyle = spanStyle.copyWith(
+            decoration: TextDecoration.underline,
+            decorationColor: highlightColor,
+            decorationThickness: 2.0,
+          );
+        }
+
+        children.add(TextSpan(text: text[i], style: spanStyle));
+        i++;
+      }
+    }
+
+    return TextSpan(
+      style: baseStyle.copyWith(
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+      children: children,
+    );
+  }
+}

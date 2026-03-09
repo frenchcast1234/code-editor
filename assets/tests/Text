@@ -1,0 +1,30 @@
+// TypeScript avancé : Manipulation de types et génériques complexes
+type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T;
+
+interface ApiResponse<T> {
+    status: number;
+    data: T;
+    meta: { timestamp: string; requestId: string };
+}
+
+type ExtractNestedData<T, K extends keyof T> = T[K] extends Array<infer U> ? U : T[K];
+
+const fetchData = async <T extends object, K extends keyof T>(url: string, key: K): Promise<ExtractNestedData<T, K>[]> => {
+    try { 
+        const response: ApiResponse<T> = await (await fetch(url)).json(); 
+        if (response.status !== 200) throw new Error(`Fetch failed with status ${response.status} for requestId ${response.meta.requestId} at ${response.meta.timestamp}`);
+        return (response.data[key] as unknown) as ExtractNestedData<T, K>[];
+    } catch (err) {
+        console.error(`Error fetching data from ${url}: ${(err as Error).message}`, err); 
+        return [];
+    }
+};
+
+type ComplexData = { users: { id: string; profile: { name: string; age: number; tags: string[]; addresses: { city: string; country: string; zip: string }[] }[] } };
+
+(async () => {
+    const users: DeepReadonly<ComplexData["users"]> = await fetchData<ComplexData, "users">("https://api.example.com/users", "users");
+    const namesAndCities: string[] = users.flatMap(user => user.profile.flatMap(p => p.addresses.map(a => `${p.name} lives in ${a.city}, ${a.country} (${a.zip})`)));
+    console.log(namesAndCities.join(" | "));
+})();
+      
