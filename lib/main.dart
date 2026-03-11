@@ -887,27 +887,26 @@ async function processUsers() {
                 ),
               ),
               if (_showReplace) ...[
-                SizedBox(
+                Container(
                   width: 150,
                   height: 30,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(100),
-                      border: Border.all(color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000)),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(100),
+                    border: Border.all(color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000)),
+                  ),
+                  child: TextField(
+                    controller: _replaceController,
+                    style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 13, height: 1.0),
+                    textAlignVertical: TextAlignVertical.top,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      hintText: 'Remplacer...',
+                      hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 13),
+                      contentPadding: EdgeInsets.only(left: 12.0),
+                      border: InputBorder.none,
                     ),
-                    child: TextField(
-                      controller: _replaceController,
-                      style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 13, height: 1.0),
-                      textAlignVertical: TextAlignVertical.center,
-                      decoration: InputDecoration(
-                        isDense: true,
-                        hintText: 'Remplacer...',
-                        hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 13),
-                        contentPadding: EdgeInsets.only(left: 12.0, bottom: 2.0),
-                        border: InputBorder.none,
-                      ),
-                      onSubmitted: (_) => _replaceCurrent(),
-                    ),
+                    onSubmitted: (_) => _replaceCurrent(),
                   ),
                 ),
                 Tooltip(
@@ -1038,7 +1037,7 @@ async function processUsers() {
                     decoration: BoxDecoration(
                       color: thmSelected == thm.sombre ? Color(0xff1f1f1f) : Colors.white,
                       border: Border(bottom: BorderSide(
-                        color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000),
+                        color: Colors.transparent, // I don't wanna rewrite this section just for removing one border
                         width: 2.0,
                       )),
                     ),
@@ -1065,11 +1064,11 @@ async function processUsers() {
                                 child: TextField(
                                   controller: _searchController,
                                   style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 14, height: 1.0),
-                                  textAlignVertical: TextAlignVertical.center,
+                                  textAlignVertical: TextAlignVertical.top,
                                   decoration: InputDecoration(
                                     isDense: true,
                                     hintText: 'Rechercher...',
-                                    hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 14),
+                                    hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 14, height: 1.0),
                                     contentPadding: EdgeInsets.only(left: 16.0),
                                     border: InputBorder.none,
                                   ),
@@ -1132,11 +1131,11 @@ async function processUsers() {
                                 child: TextField(
                                   controller: _replaceController,
                                   style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 14, height: 1.0),
-                                  textAlignVertical: TextAlignVertical.center,
+                                  textAlignVertical: TextAlignVertical.top,
                                   decoration: InputDecoration(
                                     isDense: true,
                                     hintText: 'Remplacer par...',
-                                    hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 14),
+                                    hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 14, height: 1.0),
                                     contentPadding: EdgeInsets.only(left: 16.0),
                                     border: InputBorder.none,
                                   ),
