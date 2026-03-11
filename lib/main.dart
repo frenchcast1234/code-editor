@@ -1,6 +1,3 @@
-// Claude.ai helped me a lot
-// Please understand this
-
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -46,6 +43,7 @@ class _CodeFieldState extends State<CodeField> {
 
   // Controllers
   final _searchController = TextEditingController();
+  final _replaceController = TextEditingController();
   final TextEditingController _consoleController = TextEditingController();
   final FocusNode _consoleFocusNode = FocusNode();
 
@@ -53,6 +51,7 @@ class _CodeFieldState extends State<CodeField> {
   String _searchQuery = '';
   int _searchCurrentMatch = 0;
   List<int> _searchMatches = [];
+  bool _showReplace = false;
 
   // Settings
   double fontSize = 14;
@@ -560,7 +559,12 @@ async function processUsers() {
       _searchQuery = query;
       _searchMatches = [];
       _searchCurrentMatch = 0;
-      if (query.isEmpty) return;
+      if (query.isEmpty) {
+        controllers[currentIndex].searchMatches = [];
+        controllers[currentIndex].searchMatchLen = 0;
+        controllers[currentIndex].currentMatchIndex = -1;
+        return;
+      }
       final text = controllers[currentIndex].text;
       int start = 0;
       while (true) {
@@ -569,6 +573,9 @@ async function processUsers() {
         _searchMatches.add(idx);
         start = idx + query.length;
       }
+      controllers[currentIndex].searchMatches = List.from(_searchMatches);
+      controllers[currentIndex].searchMatchLen = query.length;
+      controllers[currentIndex].currentMatchIndex = _searchMatches.isNotEmpty ? 0 : -1;
     });
   }
 
@@ -576,6 +583,7 @@ async function processUsers() {
     if (_searchMatches.isEmpty) return;
     setState(() {
       _searchCurrentMatch = (_searchCurrentMatch + 1) % _searchMatches.length;
+      controllers[currentIndex].currentMatchIndex = _searchCurrentMatch;
     });
     _jumpToMatch(_searchCurrentMatch);
   }
@@ -584,6 +592,7 @@ async function processUsers() {
     if (_searchMatches.isEmpty) return;
     setState(() {
       _searchCurrentMatch = (_searchCurrentMatch - 1 + _searchMatches.length) % _searchMatches.length;
+      controllers[currentIndex].currentMatchIndex = _searchCurrentMatch;
     });
     _jumpToMatch(_searchCurrentMatch);
   }
@@ -594,6 +603,73 @@ async function processUsers() {
       baseOffset: pos,
       extentOffset: pos + _searchQuery.length,
     );
+    _scrollToPosition(pos);
+  }
+
+  void _scrollToPosition(int charPos) {
+    final sc = scrollTxtControllers[currentIndex];
+    if (!sc.hasClients) return;
+
+    final text = controllers[currentIndex].text;
+    final textBefore = text.substring(0, charPos.clamp(0, text.length));
+    final linesBefore = '\n'.allMatches(textBefore).length;
+
+    final painter = TextPainter(
+      text: TextSpan(
+        text: 'A',
+        style: TextStyle(
+          fontSize: fontSize,
+          height: lineHeight,
+          fontFamily: 'JetBrains Mono',
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final lineH = painter.preferredLineHeight;
+
+    final targetY = linesBefore * lineH;
+    final viewportH = sc.position.viewportDimension;
+    final scrollTo = (targetY - viewportH / 2).clamp(
+      sc.position.minScrollExtent,
+      sc.position.maxScrollExtent,
+    );
+
+    sc.animateTo(
+      scrollTo,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _replaceCurrent() {
+    if (_searchMatches.isEmpty || _searchQuery.isEmpty) return;
+    final ctrl = controllers[currentIndex];
+    final pos = _searchMatches[_searchCurrentMatch];
+    final replaceWith = _replaceController.text;
+    final newText = ctrl.text.replaceRange(pos, pos + _searchQuery.length, replaceWith);
+    ctrl.value = ctrl.value.copyWith(
+      text: newText,
+      selection: TextSelection.collapsed(offset: pos + replaceWith.length),
+    );
+    _updateSearch(_searchQuery);
+    if (_searchMatches.isNotEmpty) {
+      _searchCurrentMatch = _searchCurrentMatch.clamp(0, _searchMatches.length - 1);
+      _jumpToMatch(_searchCurrentMatch);
+    }
+    setState(() {});
+  }
+
+  void _replaceAll() {
+    if (_searchQuery.isEmpty) return;
+    final ctrl = controllers[currentIndex];
+    final replaceWith = _replaceController.text;
+    final newText = ctrl.text.replaceAll(_searchQuery, replaceWith);
+    ctrl.value = ctrl.value.copyWith(
+      text: newText,
+      selection: TextSelection.collapsed(offset: 0),
+    );
+    _updateSearch(_searchQuery);
+    setState(() {});
   }
 
   @override
@@ -799,6 +875,59 @@ async function processUsers() {
             ],
           ),
           actions: [
+            if (MediaQuery.of(context).orientation == Orientation.landscape && _searchQuery.isNotEmpty) ...[
+              Tooltip(
+                message: _showReplace ? 'Masquer le remplacement' : 'Afficher le remplacement',
+                child: IconButton(
+                  icon: Icon(_showReplace ? Icons.find_replace : Icons.find_replace_outlined),
+                  color: _showReplace
+                      ? const Color(0xff1b72e8)
+                      : (thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black),
+                  onPressed: () => setState(() => _showReplace = !_showReplace),
+                ),
+              ),
+              if (_showReplace) ...[
+                SizedBox(
+                  width: 150,
+                  height: 30,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(100),
+                      border: Border.all(color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000)),
+                    ),
+                    child: TextField(
+                      controller: _replaceController,
+                      style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 13, height: 1.0),
+                      textAlignVertical: TextAlignVertical.center,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Remplacer...',
+                        hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 13),
+                        contentPadding: EdgeInsets.only(left: 12.0, bottom: 2.0),
+                        border: InputBorder.none,
+                      ),
+                      onSubmitted: (_) => _replaceCurrent(),
+                    ),
+                  ),
+                ),
+                Tooltip(
+                  message: 'Remplacer',
+                  child: IconButton(
+                    icon: Icon(Icons.find_replace, size: 20),
+                    color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black,
+                    onPressed: _replaceCurrent,
+                  ),
+                ),
+                Tooltip(
+                  message: 'Tout remplacer',
+                  child: IconButton(
+                    icon: Icon(Icons.sync_alt, size: 20),
+                    color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black,
+                    onPressed: _replaceAll,
+                  ),
+                ),
+              ],
+            ],
             IconButton(
               onPressed: () {},
               icon: Icon(Icons.arrow_back),
@@ -903,6 +1032,7 @@ async function processUsers() {
                 ),
                 // ----- Barre de recherche portrait -----
                 if (MediaQuery.of(context).orientation == Orientation.portrait) ...[
+                  // Bloc Rechercher
                   Container(
                     width: double.infinity,
                     decoration: BoxDecoration(
@@ -912,72 +1042,136 @@ async function processUsers() {
                         width: 2.0,
                       )),
                     ),
-                    height: 48,
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                    child: Container(
-                      height: 30,
-                      width: double.infinity,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(100),
-                        border: Border.all(
-                          color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000),
-                        ),
-                      ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: TextField(
-                              controller: _searchController,
-                              style: TextStyle(
-                                color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black,
-                                fontSize: 14,
-                                height: 1.0,
-                              ),
-                              textAlignVertical: TextAlignVertical.top,
-                              decoration: InputDecoration(
-                                isDense: true,
-                                hintText: 'Rechercher...',
-                                hintStyle: TextStyle(
-                                  color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000),
-                                  fontSize: 14,
-                                ),
-                                contentPadding: EdgeInsets.only(left: 16.0),
-                                border: InputBorder.none,
-                              ),
-                              onSubmitted: (_) => _searchNext(),
-                            ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8.0, bottom: 6.0),
+                          child: Text('Rechercher',
+                            style: TextStyle(fontSize: 13, letterSpacing: 0.8,
+                              color: thmSelected == thm.sombre ? Color(0x99ffffff) : Color(0x99000000)),
                           ),
-                          if (_searchMatches.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(right: 4),
-                              child: Text(
-                                '${_searchCurrentMatch + 1}/${_searchMatches.length}',
-                                style: TextStyle(fontSize: 11,
-                                    color: thmSelected == thm.sombre ? Color(0x99ffffff) : Color(0x99000000)),
+                        ),
+                        Container(
+                          height: 36,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(100),
+                            border: Border.all(color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000)),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _searchController,
+                                  style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 14, height: 1.0),
+                                  textAlignVertical: TextAlignVertical.center,
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    hintText: 'Rechercher...',
+                                    hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 14),
+                                    contentPadding: EdgeInsets.only(left: 16.0),
+                                    border: InputBorder.none,
+                                  ),
+                                  onSubmitted: (_) => _searchNext(),
+                                ),
+                              ),
+                              if (_searchMatches.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 4),
+                                  child: Text('${_searchCurrentMatch + 1}/${_searchMatches.length}',
+                                    style: TextStyle(fontSize: 11,
+                                      color: thmSelected == thm.sombre ? Color(0x99ffffff) : Color(0x99000000))),
+                                ),
+                              if (_searchQuery.isNotEmpty) ...[
+                                InkWell(onTap: _searchPrev,
+                                  child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6),
+                                    child: Icon(Icons.keyboard_arrow_up, size: 20,
+                                      color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black))),
+                                InkWell(onTap: _searchNext,
+                                  child: Padding(padding: const EdgeInsets.only(left: 2, right: 8),
+                                    child: Icon(Icons.keyboard_arrow_down, size: 20,
+                                      color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black))),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Bloc Remplacer
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: thmSelected == thm.sombre ? Color(0xff1f1f1f) : Colors.white,
+                      border: Border(bottom: BorderSide(
+                        color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000),
+                        width: 2.0,
+                      )),
+                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 10.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8.0, bottom: 6.0),
+                          child: Text('Remplacer',
+                            style: TextStyle(fontSize: 13, letterSpacing: 0.8,
+                              color: thmSelected == thm.sombre ? Color(0x99ffffff) : Color(0x99000000)),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Container(
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(100),
+                                  border: Border.all(color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000)),
+                                ),
+                                child: TextField(
+                                  controller: _replaceController,
+                                  style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 14, height: 1.0),
+                                  textAlignVertical: TextAlignVertical.center,
+                                  decoration: InputDecoration(
+                                    isDense: true,
+                                    hintText: 'Remplacer par...',
+                                    hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 14),
+                                    contentPadding: EdgeInsets.only(left: 16.0),
+                                    border: InputBorder.none,
+                                  ),
+                                  onSubmitted: (_) => _replaceCurrent(),
+                                ),
                               ),
                             ),
-                          if (_searchQuery.isNotEmpty)
-                            InkWell(
-                              onTap: _searchPrev,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 2),
-                                child: Icon(Icons.keyboard_arrow_up, size: 18,
+                            SizedBox(width: 6),
+                            Tooltip(
+                              message: 'Remplacer',
+                              child: InkWell(
+                                onTap: _replaceCurrent,
+                                borderRadius: BorderRadius.circular(8),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(6.0),
+                                  child: Icon(Icons.find_replace, size: 22,
                                     color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black),
+                                ),
                               ),
                             ),
-                          if (_searchQuery.isNotEmpty)
-                            InkWell(
-                              onTap: _searchNext,
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 2),
-                                child: Icon(Icons.keyboard_arrow_down, size: 18,
+                            Tooltip(
+                              message: 'Tout remplacer',
+                              child: InkWell(
+                                onTap: _replaceAll,
+                                borderRadius: BorderRadius.circular(8),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(6.0),
+                                  child: Icon(Icons.sync_alt, size: 22,
                                     color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black),
+                                ),
                               ),
                             ),
-                        ],
-                      ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -1783,6 +1977,9 @@ class LineNumbers extends StatelessWidget {
 class SyntaxController extends TextEditingController {
   TextStyle baseStyle;
   thm thmSelected;
+  List<int> searchMatches = [];
+  int searchMatchLen = 0;
+  int currentMatchIndex = -1;
 
   SyntaxController({
     super.text,
@@ -1819,46 +2016,81 @@ class SyntaxController extends TextEditingController {
 
   Color _dark(String variable) {
     switch (variable) {
-      case 'comment':     return const Color(0xff6a9955);
-      case 'string':      return const Color(0xffce9178);
-      case 'number':      return const Color(0xffb5cea8);
-      case 'keyword':     return const Color(0xff569cd6);
-      case 'type':        return const Color(0xff4ec9b0);
-      case 'builtin':     return const Color(0xffdcdcaa);
-      case 'definition':  return const Color(0xff4ec9b0);
-      case 'function':    return const Color(0xffdcdcaa);
-      case 'variable':    return const Color(0xffebebeb);
-      case 'property':    return const Color(0xff9cdcfe);
-      case 'tag':         return const Color(0xff569cd6);
-      case 'attribute':   return const Color(0xff9cdcfe);
-      case 'meta':        return const Color(0xffc586c0);
-      case 'invalid':     return const Color(0xfff44747);
-      case 'inserted':    return const Color(0xffb5cea8);
-      case 'deleted':     return const Color(0xffce9178);
-      case 'url':         return const Color(0xff4ec9b0);
-      case 'text':        return const Color(0xffebebeb);
-      default:            return const Color(0xffebebeb);
+      // CSS: --ta-token-comment-color: #75715e
+      case 'comment':     return const Color(0xff75715e);
+      // CSS: --ta-token-string-color: #e6db74
+      case 'string':      return const Color(0xffe6db74);
+      // CSS: --ta-token-number-color: #ae81ff
+      case 'number':      return const Color(0xffae81ff);
+      // CSS: --ta-token-keyword-color: #f92672
+      case 'keyword':     return const Color(0xfff92672);
+      // CSS: --ta-token-type-color: #ae81ff
+      case 'type':        return const Color(0xffae81ff);
+      // CSS: --ta-token-builtin-color: #9fb4d6
+      case 'builtin':     return const Color(0xff9fb4d6);
+      // CSS: --ta-token-definition-color: #fd971f
+      case 'definition':  return const Color(0xfffd971f);
+      // CSS: --ta-token-variable-color: #a6e22e (function calls mapped to variable color)
+      case 'function':    return const Color(0xffa6e22e);
+      // CSS: --ta-token-variable-color: #a6e22e
+      case 'variable':    return const Color(0xffa6e22e);
+      // CSS: --ta-token-property-color: #a6e22e
+      case 'property':    return const Color(0xffa6e22e);
+      // CSS: --ta-token-tag-color: #f92672
+      case 'tag':         return const Color(0xfff92672);
+      // CSS: --ta-token-attribute-color: #a6e22e
+      case 'attribute':   return const Color(0xffa6e22e);
+      // CSS: --ta-token-meta-color: #8f8f8f
+      case 'meta':        return const Color(0xff8f8f8f);
+      // CSS: --ta-token-invalid-background-color: #f92672, --ta-token-invalid-color: #f8f8f0
+      case 'invalid':     return const Color(0xfff8f8f0);
+      // CSS: --ta-token-inserted-color: #292 → #229922
+      case 'inserted':    return const Color(0xff229922);
+      // CSS: --ta-token-deleted-color: #d44 → #dd4444
+      case 'deleted':     return const Color(0xffdd4444);
+      // CSS: --ta-token-url-color: var(--ta-token-string-color) → #e6db74
+      case 'url':         return const Color(0xffe6db74);
+      // CSS: --ta-token-variable-special-color: #9effff
+      case 'text':        return const Color(0xfff8f8f2);
+      default:            return const Color(0xfff8f8f2);
     }
   }
 
   Color _light(String variable) {
     switch (variable) {
-      case 'comment':     return const Color(0xff008000);
-      case 'string':      return const Color(0xffa31515);
-      case 'number':      return const Color(0xff098658);
-      case 'keyword':     return const Color(0xff0000ff);
-      case 'type':        return const Color(0xff267f99);
-      case 'builtin':     return const Color(0xff795e26);
+      // CSS: --ta-token-comment-color: #a50  → #aa5500
+      case 'comment':     return const Color(0xffaa5500);
+      // CSS: --ta-token-string-color: #a11  → #aa1111
+      case 'string':      return const Color(0xffaa1111);
+      // CSS: --ta-token-number-color: #164  → #116644
+      case 'number':      return const Color(0xff116644);
+      // CSS: --ta-token-keyword-color: #708  → #770088
+      case 'keyword':     return const Color(0xff770088);
+      // CSS: --ta-token-type-color: #219  → #221199
+      case 'type':        return const Color(0xff221199);
+      // CSS: --ta-token-builtin-color: #30a  → #3300aa
+      case 'builtin':     return const Color(0xff3300aa);
+      // CSS: --ta-token-definition-color: #00f  → blue
       case 'definition':  return const Color(0xff0000ff);
+      // CSS: --ta-token-variable-special-color: #00c → #0000cc (function calls etc.)
       case 'function':    return const Color(0xff0000cc);
+      // CSS: --ta-token-variable-color: black
       case 'variable':    return Colors.black;
+      // CSS: --ta-token-property-color: black
       case 'property':    return Colors.black;
+      // CSS: --ta-token-tag-color: #170  → #117700
       case 'tag':         return const Color(0xff117700);
+      // CSS: --ta-token-attribute-color: #00c → #0000cc
       case 'attribute':   return const Color(0xff0000cc);
+      // CSS: --ta-token-meta-color: #555  → #555555
       case 'meta':        return const Color(0xff555555);
+      // CSS: --ta-token-invalid-color: #f00
       case 'invalid':     return const Color(0xffff0000);
+      // CSS: --ta-token-inserted-color: #292 → #229922
       case 'inserted':    return const Color(0xff229922);
+      // CSS: --ta-token-deleted-color: #d44 → #dd4444
       case 'deleted':     return const Color(0xffdd4444);
+      // CSS: --ta-token-url-color: var(--ta-token-string-color) → #aa1111
       case 'url':         return const Color(0xffaa1111);
       case 'text':        return Colors.black;
       default:            return Colors.black;
@@ -1895,13 +2127,48 @@ class SyntaxController extends TextEditingController {
     final highlightColor = _c('text');
     final matchIndex = findMatchingParen(text, cursor - 1);
 
+    // Build a set of search match ranges for quick lookup
+    final matchSet = <int, int>{}; // start -> matchIndex
+    for (int mi = 0; mi < searchMatches.length; mi++) {
+      matchSet[searchMatches[mi]] = mi;
+    }
+
+    // Colors from the CSS
+    // dark: rgba(253,207,76,.5) → 0x80fdcf4c  (other matches), current: brighter
+    // light: rgb(26,115,232,0.18) → 0x2e1a73e8 (other matches), current: 0x461a73e8
+    final Color searchHighlightColor = thmSelected == thm.sombre
+        ? const Color(0x80fdcf4c)
+        : const Color(0x2e1a73e8);
+    final Color searchCurrentColor = thmSelected == thm.sombre
+        ? const Color(0xb0fdcf4c)
+        : const Color(0x5a1a73e8);
+
     int i = 0;
 
     while (i < text.length) {
+      // Check if we're at the start of a search match
+      if (searchMatchLen > 0 && matchSet.containsKey(i)) {
+        final mi = matchSet[i]!;
+        final end = (i + searchMatchLen).clamp(0, text.length);
+        final matchText = text.substring(i, end);
+        final bgColor = mi == currentMatchIndex ? searchCurrentColor : searchHighlightColor;
+        // We paint the matched text with a background highlight using a WidgetSpan trick
+        // Since TextSpan doesn't support background directly for arbitrary ranges,
+        // we use TextStyle backgroundColor
+        children.add(TextSpan(
+          text: matchText,
+          style: baseStyle.copyWith(backgroundColor: bgColor),
+        ));
+        i = end;
+        continue;
+      }
+
       // Commentaire //
       if (text.startsWith("//", i)) {
         final end = text.indexOf('\n', i);
         final commentText = end == -1 ? text.substring(i) : text.substring(i, end);
+        // Check if any part of this comment overlaps a search match — handled char by char for simplicity
+        // For comments, just check start
         final urlMatch = urlRegex.firstMatch(commentText);
         if (urlMatch != null) {
           if (urlMatch.start > 0) {
