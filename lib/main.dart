@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -73,6 +74,12 @@ class _CodeFieldState extends State<CodeField> {
   List<String?> filePaths = [null, null];
   List<String> fileNames = ["Text", "Txt2"];
   List<bool> fileModified = [false, false]; // true = non sauvegardé
+
+  // Undo/Redo par onglet
+  List<List<TextEditingValue>> _undoStacks = [[], []];
+  List<List<TextEditingValue>> _redoStacks = [[], []];
+  static const int _maxHistorySize = 200;
+  bool _isUndoRedo = false;
   List<SyntaxController> controllers = [
     SyntaxController(
       text: r""" 
@@ -483,12 +490,16 @@ async function processUsers() {
   // Console
   List<List<String>> consoleOutput = [];
 
+  Timer? _searchDebounceTimer;
+
   // ---------- helpers pour ajouter un onglet ----------
   void _addTab({String? name, String? path, String content = ''}) {
     final tabName = name ?? 'Nouveau fichier ${fileNames.length + 1}';
     fileNames.add(tabName);
     filePaths.add(path);
     fileModified.add(false);
+    _undoStacks.add([]);
+    _redoStacks.add([]);
     controllers.add(SyntaxController(
       text: content,
       thmSelected: thmSelected,
@@ -523,6 +534,14 @@ async function processUsers() {
         scrollTxtHControllers[k].jumpTo(scrollHBarControllers[k].offset);
       }
     });
+    controllers[k].addListener(() {
+      if (_searchQuery.isNotEmpty && k == currentIndex) {
+        _searchDebounceTimer?.cancel();
+        _searchDebounceTimer = Timer(Duration(milliseconds: 300), () {
+          _updateSearch(_searchQuery);
+        });
+      }
+    });
   }
 
   // ---------- enregistrer ----------
@@ -555,16 +574,15 @@ async function processUsers() {
 
   // ---------- recherche ----------
   void _updateSearch(String query) {
-    setState(() {
-      _searchQuery = query;
-      _searchMatches = [];
-      _searchCurrentMatch = 0;
-      if (query.isEmpty) {
-        controllers[currentIndex].searchMatches = [];
-        controllers[currentIndex].searchMatchLen = 0;
-        controllers[currentIndex].currentMatchIndex = -1;
-        return;
-      }
+    _searchQuery = query;
+    _searchMatches = [];
+    _searchCurrentMatch = 0;
+
+    if (query.isEmpty) {
+      controllers[currentIndex].searchMatches = [];
+      controllers[currentIndex].searchMatchLen = 0;
+      controllers[currentIndex].currentMatchIndex = -1;
+    } else {
       final text = controllers[currentIndex].text;
       int start = 0;
       while (true) {
@@ -576,7 +594,10 @@ async function processUsers() {
       controllers[currentIndex].searchMatches = List.from(_searchMatches);
       controllers[currentIndex].searchMatchLen = query.length;
       controllers[currentIndex].currentMatchIndex = _searchMatches.isNotEmpty ? 0 : -1;
-    });
+    }
+
+    controllers[currentIndex].notifyListeners(); // remplace forceRebuildSpans()
+    if (mounted) setState(() {});
   }
 
   void _searchNext() {
@@ -672,6 +693,63 @@ async function processUsers() {
     setState(() {});
   }
 
+  // ---------- undo / redo ----------
+  void _undo(int idx) {
+    final stack = _undoStacks[idx];
+    if (stack.isEmpty) return;
+    // Sauvegarder l'état courant dans redo AVANT de changer
+    _redoStacks[idx].add(controllers[idx].value);
+    _isUndoRedo = true;
+    controllers[idx].value = stack.removeLast();
+    _isUndoRedo = false;
+    setState(() {});
+  }
+
+  void _redo(int idx) {
+    final stack = _redoStacks[idx];
+    if (stack.isEmpty) return;
+    // Sauvegarder l'état courant dans undo AVANT de changer
+    _undoStacks[idx].add(controllers[idx].value);
+    _isUndoRedo = true;
+    controllers[idx].value = stack.removeLast();
+    _isUndoRedo = false;
+    setState(() {});
+  }
+
+  bool get _canUndo => _undoStacks[currentIndex].isNotEmpty;
+  bool get _canRedo => _redoStacks[currentIndex].isNotEmpty;
+
+  // ---------- insérer une tabulation ----------
+  void _insertTab(int idx) {
+    final controller = controllers[idx];
+    final text = controller.text;
+    final selection = controller.selection;
+    if (!selection.isValid) return;
+    final tabSize = spacesPerTab.toInt();
+    if (selection.isCollapsed) {
+      final cursor = selection.start.clamp(0, text.length);
+      final lineStartRaw = text.lastIndexOf('\n', cursor - 1);
+      final lineStart = lineStartRaw == -1 ? 0 : lineStartRaw + 1;
+      final column = cursor - lineStart;
+      final spacesToInsert = tabSize - (column % tabSize);
+      controller.value = controller.value.copyWith(
+        text: text.replaceRange(cursor, cursor, ' ' * spacesToInsert),
+        selection: TextSelection.collapsed(offset: cursor + spacesToInsert),
+      );
+    } else {
+      // Indenter la sélection
+      final start = selection.start;
+      final end = selection.end;
+      final spaces = ' ' * tabSize;
+      final newText = text.replaceRange(start, end, spaces);
+      controller.value = controller.value.copyWith(
+        text: newText,
+        selection: TextSelection.collapsed(offset: start + spaces.length),
+      );
+    }
+    setState(() {});
+  }
+
   @override
   void initState() {
     super.initState();
@@ -680,8 +758,7 @@ async function processUsers() {
         if (scrollNumControllers[k].hasClients) {
           scrollNumControllers[k].jumpTo(scrollTxtControllers[k].offset);
         }
-      });
-      scrollTxtHControllers[k].addListener(() {
+      });scrollTxtHControllers[k].addListener(() {
         if (scrollHBarControllers[k].hasClients &&
             scrollHBarControllers[k].offset != scrollTxtHControllers[k].offset) {
           scrollHBarControllers[k].jumpTo(scrollTxtHControllers[k].offset);
@@ -694,16 +771,35 @@ async function processUsers() {
         }
       });
     }
-    // Écouter les modifications pour marquer le fichier comme non sauvegardé
     for (int k = 0; k < controllers.length; k++) {
       final idx = k;
+      TextEditingValue _prevValue = controllers[k].value;
       controllers[k].addListener(() {
+        if (_isUndoRedo) {
+          _prevValue = controllers[idx].value;
+          return;
+        }
         if (!fileModified[idx]) {
           setState(() => fileModified[idx] = true);
         }
+        final current = controllers[idx].value;
+        if (current.text != _prevValue.text) {
+          final stack = _undoStacks[idx];
+          if (stack.isEmpty || stack.last.text != _prevValue.text) {
+            stack.add(_prevValue);
+            if (stack.length > _maxHistorySize) stack.removeAt(0);
+          }_redoStacks[idx].clear();
+
+          if (_searchQuery.isNotEmpty && idx == currentIndex) {
+            _searchDebounceTimer?.cancel();
+            _searchDebounceTimer = Timer(Duration(milliseconds: 300), () {
+              _updateSearch(_searchQuery);
+            });
+          }
+        }
+        _prevValue = current;
       });
     }
-    // Initialiser la recherche sur le controller de recherche
     _searchController.addListener(() {
       _updateSearch(_searchController.text);
     });
@@ -887,26 +983,35 @@ async function processUsers() {
                 ),
               ),
               if (_showReplace) ...[
-                Container(
+                SizedBox(
                   width: 150,
                   height: 30,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(100),
-                    border: Border.all(color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000)),
-                  ),
-                  child: TextField(
-                    controller: _replaceController,
-                    style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 13, height: 1.0),
-                    textAlignVertical: TextAlignVertical.top,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      hintText: 'Remplacer...',
-                      hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 13),
-                      contentPadding: EdgeInsets.only(left: 12.0),
-                      border: InputBorder.none,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(100),
+                      border: Border.all(
+                        color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000),
+                      ),
                     ),
-                    onSubmitted: (_) => _replaceCurrent(),
+                    child: TextField(
+                      controller: _replaceController,
+                      style: TextStyle(
+                        color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black,
+                        fontSize: 13,
+                      ),
+                      textAlignVertical: TextAlignVertical.center,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Remplacer...',
+                        hintStyle: TextStyle(
+                          color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000),
+                          fontSize: 13,
+                        ),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12.0),
+                        border: InputBorder.none,
+                      ),
+                      onSubmitted: (_) => _replaceCurrent(),
+                    ),
                   ),
                 ),
                 Tooltip(
@@ -928,19 +1033,21 @@ async function processUsers() {
               ],
             ],
             IconButton(
-              onPressed: () {},
+              onPressed: _canUndo ? () => _undo(currentIndex) : null,
               icon: Icon(Icons.arrow_back),
               color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black,
+              disabledColor: thmSelected == thm.sombre ? Color(0x33ffffff) : Color(0x33000000),
               tooltip: 'Annuler',
             ),
             IconButton(
-              onPressed: () {},
+              onPressed: _canRedo ? () => _redo(currentIndex) : null,
               icon: Icon(Icons.arrow_forward),
               color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black,
+              disabledColor: thmSelected == thm.sombre ? Color(0x33ffffff) : Color(0x33000000),
               tooltip: 'Rétablir',
             ),
             IconButton(
-              onPressed: () {},
+              onPressed: () => _insertTab(currentIndex),
               icon: Icon(Icons.keyboard_tab),
               color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black,
               tooltip: 'Tabulation',
@@ -1126,20 +1233,36 @@ async function processUsers() {
                                 height: 36,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(100),
-                                  border: Border.all(color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000)),
-                                ),
-                                child: TextField(
-                                  controller: _replaceController,
-                                  style: TextStyle(color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black, fontSize: 14, height: 1.0),
-                                  textAlignVertical: TextAlignVertical.top,
-                                  decoration: InputDecoration(
-                                    isDense: true,
-                                    hintText: 'Remplacer par...',
-                                    hintStyle: TextStyle(color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000), fontSize: 14, height: 1.0),
-                                    contentPadding: EdgeInsets.only(left: 16.0),
-                                    border: InputBorder.none,
+                                  border: Border.all(
+                                    color: thmSelected == thm.sombre ? Color(0x1fffffff) : Color(0x0a000000),
                                   ),
-                                  onSubmitted: (_) => _replaceCurrent(),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: TextField(
+                                        controller: _replaceController,
+                                        style: TextStyle(
+                                          color: thmSelected == thm.sombre ? Color(0xffebebeb) : Colors.black,
+                                          fontSize: 14,
+                                          height: 1.0
+                                        ),
+                                        textAlignVertical: TextAlignVertical.top,
+                                        decoration: InputDecoration(
+                                          isDense: true,
+                                          hintText: 'Remplacer...',
+                                          hintStyle: TextStyle(
+                                            color: thmSelected == thm.sombre ? Color(0x55ffffff) : Color(0x55000000),
+                                            fontSize: 14,
+                                            height: 1.0
+                                          ),
+                                          contentPadding: EdgeInsets.only(left: 16.0),
+                                          border: InputBorder.none,
+                                        ),
+                                        onSubmitted: (_) => _replaceCurrent(),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -1622,10 +1745,28 @@ async function processUsers() {
                                 child: Focus(
                                   focusNode: focusNodes[i],
                                   onKeyEvent: (node, event) {
+                                    if (event is! KeyDownEvent) return KeyEventResult.ignored;
                                     final controller = controllers[i];
                                     final text = controller.text;
                                     final selection = controller.selection;
                                     final tabSize = spacesPerTab.toInt();
+                                    final ctrl = HardwareKeyboard.instance.isControlPressed ||
+                                        HardwareKeyboard.instance.isMetaPressed;
+
+                                    // Ctrl+Z → undo
+                                    if (ctrl && event.logicalKey == LogicalKeyboardKey.keyZ &&
+                                        !HardwareKeyboard.instance.isShiftPressed) {
+                                      _undo(i);
+                                      return KeyEventResult.handled;
+                                    }
+
+                                    // Ctrl+Y ou Ctrl+Shift+Z → redo
+                                    if (ctrl && (event.logicalKey == LogicalKeyboardKey.keyY ||
+                                        (event.logicalKey == LogicalKeyboardKey.keyZ &&
+                                            HardwareKeyboard.instance.isShiftPressed))) {
+                                      _redo(i);
+                                      return KeyEventResult.handled;
+                                    }
 
                                     if (selection.isCollapsed) {
                                       final cursor = selection.start.clamp(0, text.length);
@@ -1634,9 +1775,8 @@ async function processUsers() {
                                       final lineStart = lineStartRaw == -1 ? 0 : lineStartRaw + 1;
                                       final column = cursor - lineStart;
 
-                                      // Tab → espaces (toujours, indépendamment de convertTabsToSpace qui agit à la saisie)
-                                      if (event is KeyDownEvent &&
-                                          event.logicalKey == LogicalKeyboardKey.tab) {
+                                      // Tab → espaces
+                                      if (event.logicalKey == LogicalKeyboardKey.tab) {
                                         final spacesToInsert = tabSize - (column % tabSize);
                                         controller.value = controller.value.copyWith(
                                           text: text.replaceRange(cursor, cursor, ' ' * spacesToInsert),
@@ -1647,7 +1787,6 @@ async function processUsers() {
 
                                       // Backspace intelligent (retrait intelligent)
                                       if (retraitIntelligent &&
-                                          event is KeyDownEvent &&
                                           event.logicalKey == LogicalKeyboardKey.backspace &&
                                           cursor > 0) {
                                         int spaceCount = 0;
@@ -2339,4 +2478,4 @@ class SyntaxController extends TextEditingController {
       children: children,
     );
   }
-}
+} //Erreurs : alignement remplacer mode ordi, scroll recherche h, coloration ``
