@@ -6,3 +6,6 @@ Improving the research system.
 
 # *11/03/2026* ~ **Version 3.0**
 Adding the research system for mobile users.
+
+# *12/03/2026* ~ **Version 4.0**
+Bugs correcting
